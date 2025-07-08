@@ -1,18 +1,28 @@
-import os, json, threading, subprocess, uuid, time
-from telegram import ReplyKeyboardMarkup, KeyboardButton, Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+import os, json, threading, subprocess
+from flask import Flask, request
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import requests
+from dotenv import load_dotenv
 
-TOKEN = "7718570853:AAGLRnxyQ-GJm2qvmQ7VXC-WEzgdK6DBQ1I"
+# Load .env
+load_dotenv()
+TOKEN = os.getenv("TOKEN")
 BASE_DIR = "users"
 os.makedirs(BASE_DIR, exist_ok=True)
 user_sessions = {}
 
-def start(update: Update, context: CallbackContext):
-    kb = [[KeyboardButton("VisualHosting")], [KeyboardButton("JWT Generator")]]
-    update.message.reply_text("Choose an option:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+# Flask app
+app = Flask(__name__)
+application = None  # Global app instance for telegram
 
-def handle_msg(update: Update, context: CallbackContext):
+# /start command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb = [[KeyboardButton("VisualHosting")], [KeyboardButton("JWT Generator")]]
+    await update.message.reply_text("Choose an option:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+
+# Handle messages
+async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     uid = str(update.effective_user.id)
     folder = os.path.join(BASE_DIR, uid)
@@ -20,19 +30,18 @@ def handle_msg(update: Update, context: CallbackContext):
 
     if text == "VisualHosting":
         kb = [[KeyboardButton("Make"), KeyboardButton("Info")], [KeyboardButton("Back")]]
-        update.message.reply_text("Visual Hosting Options:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+        await update.message.reply_text("Visual Hosting Options:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
     elif text == "Make":
         bot_file = os.path.join(folder, "bot.py")
         if not os.path.exists(bot_file):
-            update.message.reply_text("No `bot.py` found in your folder.")
+            await update.message.reply_text("No `bot.py` found in your folder.")
             return
         if uid in user_sessions:
-            update.message.reply_text("Bot already running.")
+            await update.message.reply_text("Bot already running.")
             return
-        update.message.reply_text("Bot is starting... ✅")
+        await update.message.reply_text("Bot is starting... ✅")
 
-        # Run in background
         def run():
             p = subprocess.Popen(["python3", bot_file], cwd=folder)
             user_sessions[uid] = p
@@ -45,33 +54,34 @@ def handle_msg(update: Update, context: CallbackContext):
         files = os.listdir(folder)
         status = "🟢 ON" if uid in user_sessions else "🔴 OFF"
         file_list = "\n".join(files)
-        update.message.reply_text(f"📂 Files:\n{file_list}\n\nStatus: {status}")
+        await update.message.reply_text(f"📂 Files:\n{file_list}\n\nStatus: {status}")
 
     elif text == "Back":
-        start(update, context)
+        await start(update, context)
 
     elif text == "JWT Generator":
-        update.message.reply_text("Please send `.json` file with UID & Password list.")
+        await update.message.reply_text("Please send `.json` file with UID & Password list.")
 
-def handle_file(update: Update, context: CallbackContext):
+# Handle file upload
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = update.message.document
     uid = str(update.effective_user.id)
     folder = os.path.join(BASE_DIR, uid)
     os.makedirs(folder, exist_ok=True)
 
     file_path = os.path.join(folder, file.file_name)
-    file.get_file().download(custom_path=file_path)
-    update.message.reply_text(f"File `{file.file_name}` saved!")
+    await file.get_file().download_to_drive(custom_path=file_path)
+    await update.message.reply_text(f"File `{file.file_name}` saved!")
 
     if file.file_name.endswith(".json"):
         with open(file_path, "r") as f:
             try:
                 creds = json.load(f)
             except:
-                update.message.reply_text("❌ Invalid JSON.")
+                await update.message.reply_text("❌ Invalid JSON.")
                 return
 
-        update.message.reply_text("Processing UIDs...\n")
+        await update.message.reply_text("Processing UIDs...\n")
 
         results = []
         for i, entry in enumerate(creds, start=1):
@@ -86,21 +96,38 @@ def handle_file(update: Update, context: CallbackContext):
                 r = requests.get(url)
                 token = r.text.strip()
                 results.append(f"{i}. ✅ Token: `{token}`")
-            except Exception as e:
+            except Exception:
                 results.append(f"{i}. ❌ Error")
 
         result_txt = "\n".join(results)
-        update.message.reply_text(f"✅ Done:\n{result_txt}")
+        await update.message.reply_text(f"✅ Done:\n{result_txt}")
 
-def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_msg))
-    dp.add_handler(MessageHandler(Filters.document, handle_file))
+# Set up Telegram app with handlers
+async def setup_bot():
+    global application
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()  # Not required in webhook, but safe
+    print("Bot started!")
 
-    updater.start_polling()
-    updater.idle()
+# Flask endpoint to receive Telegram webhooks
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.update_queue.put(update)
+    return "OK"
 
+# Root route for test
+@app.route("/", methods=["GET"])
+def index():
+    return "Bot is running ✅"
+
+# Start everything
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(setup_bot())
+    app.run(host="0.0.0.0", port=10000)
