@@ -1,12 +1,10 @@
 import os
 import json
-import threading
 import subprocess
-import uuid
-import time
+import threading
 
 from flask import Flask
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -14,7 +12,6 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-
 import requests
 
 TOKEN = "7718570853:AAGLRnxyQ-GJm2qvmQ7VXC-WEzgdK6DBQ1I"
@@ -22,8 +19,8 @@ BASE_DIR = "users"
 os.makedirs(BASE_DIR, exist_ok=True)
 user_sessions = {}
 
+# Flask Web Alive
 app = Flask(__name__)
-
 @app.route('/')
 def home():
     return "Bot is alive ✅"
@@ -31,12 +28,9 @@ def home():
 # /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[KeyboardButton("VisualHosting")], [KeyboardButton("JWT Generator")]]
-    await update.message.reply_text(
-        "Choose an option:",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    )
+    await update.message.reply_text("Choose an option:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
-# text message handler
+# message handler
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     uid = str(update.effective_user.id)
@@ -45,15 +39,12 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "VisualHosting":
         kb = [[KeyboardButton("Make"), KeyboardButton("Info")], [KeyboardButton("Back")]]
-        await update.message.reply_text(
-            "Visual Hosting Options:",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-        )
+        await update.message.reply_text("Visual Hosting Options:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
     elif text == "Make":
         bot_file = os.path.join(folder, "bot.py")
         if not os.path.exists(bot_file):
-            await update.message.reply_text("No `bot.py` found in your folder.")
+            await update.message.reply_text("No `bot.py` found.")
             return
         if uid in user_sessions:
             await update.message.reply_text("Bot already running.")
@@ -81,7 +72,7 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "JWT Generator":
         await update.message.reply_text("Please send `.json` file with UID & Password list.")
 
-# file upload handler
+# file handler
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = update.message.document
     uid = str(update.effective_user.id)
@@ -97,7 +88,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             with open(file_path, "r") as f:
                 creds = json.load(f)
-        except Exception:
+        except:
             await update.message.reply_text("❌ Invalid JSON.")
             return
 
@@ -122,19 +113,19 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result_txt = "\n".join(results)
         await update.message.reply_text(f"✅ Done:\n{result_txt}")
 
-# main function
+# main
 async def main():
-    application = ApplicationBuilder().token(TOKEN).build()
+    app_builder = ApplicationBuilder().token(TOKEN)
+    application = app_builder.build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    print("Bot running ✅")
+    print("Bot started ✅")
     await application.run_polling()
 
-# run both flask and telegram bot
 if __name__ == "__main__":
-    import asyncio
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
+    import asyncio
     asyncio.run(main())
