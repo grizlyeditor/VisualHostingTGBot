@@ -14,23 +14,24 @@ from telegram.ext import (
 )
 import requests
 
+# ===================== BASIC SETUP =====================
 TOKEN = "7718570853:AAGLRnxyQ-GJm2qvmQ7VXC-WEzgdK6DBQ1I"
 BASE_DIR = "users"
 os.makedirs(BASE_DIR, exist_ok=True)
 user_sessions = {}
 
-# Flask Web Alive
+# ===================== FLASK APP =====================
 app = Flask(__name__)
 @app.route('/')
 def home():
     return "Bot is alive ✅"
 
-# /start command
+# ===================== START COMMAND =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[KeyboardButton("VisualHosting")], [KeyboardButton("JWT Generator")]]
     await update.message.reply_text("Choose an option:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
-# message handler
+# ===================== TEXT HANDLER =====================
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     uid = str(update.effective_user.id)
@@ -43,20 +44,29 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "Make":
         bot_file = os.path.join(folder, "bot.py")
+
+        # Create default bot.py if not present
         if not os.path.exists(bot_file):
-            await update.message.reply_text("No `bot.py` found.")
-            return
+            with open(bot_file, "w") as f:
+                f.write('print("Hello from your bot.py!")\nimport time\ntime.sleep(30)\n')
+            await update.message.reply_text("✅ Default `bot.py` created!")
+
         if uid in user_sessions:
-            await update.message.reply_text("Bot already running.")
+            await update.message.reply_text("⚠️ Bot already running.")
             return
 
-        await update.message.reply_text("Bot is starting... ✅")
+        await update.message.reply_text("🚀 Starting your bot...")
 
+        # Run in background
         def run():
-            p = subprocess.Popen(["python3", "bot.py"], cwd=folder)
-            user_sessions[uid] = p
-            p.wait()
-            user_sessions.pop(uid, None)
+            try:
+                p = subprocess.Popen(["python3", "bot.py"], cwd=folder)
+                user_sessions[uid] = p
+                p.wait()
+            except Exception as e:
+                print(f"Subprocess error: {e}")
+            finally:
+                user_sessions.pop(uid, None)
 
         threading.Thread(target=run).start()
 
@@ -70,9 +80,9 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
 
     elif text == "JWT Generator":
-        await update.message.reply_text("Please send `.json` file with UID & Password list.")
+        await update.message.reply_text("📤 Please send a `.json` file with UID & Password list.")
 
-# file handler
+# ===================== FILE HANDLER =====================
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = update.message.document
     uid = str(update.effective_user.id)
@@ -82,7 +92,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = os.path.join(folder, file.file_name)
     new_file = await file.get_file()
     await new_file.download_to_drive(custom_path=file_path)
-    await update.message.reply_text(f"File `{file.file_name}` saved!")
+    await update.message.reply_text(f"✅ File `{file.file_name}` saved!")
 
     if file.file_name.endswith(".json"):
         try:
@@ -92,14 +102,14 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Invalid JSON.")
             return
 
-        await update.message.reply_text("Processing UIDs...\n")
+        await update.message.reply_text("🔄 Processing UIDs...")
         results = []
 
         for i, entry in enumerate(creds, start=1):
             uid_ = entry.get("uid")
             pwd = entry.get("password")
             if not uid_ or not pwd:
-                results.append(f"{i}. Skipped (invalid entry)")
+                results.append(f"{i}. ❌ Skipped (invalid entry)")
                 continue
 
             url = f"https://jw-ttoken.vercel.app/token?uid={uid_}&password={pwd}"
@@ -113,18 +123,18 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result_txt = "\n".join(results)
         await update.message.reply_text(f"✅ Done:\n{result_txt}")
 
-# main
+# ===================== MAIN =====================
 async def main():
-    app_builder = ApplicationBuilder().token(TOKEN)
-    application = app_builder.build()
+    application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    print("Bot started ✅")
+    print("✅ Bot is running...")
     await application.run_polling()
 
+# ===================== ENTRY =====================
 if __name__ == "__main__":
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
     import asyncio
